@@ -8,6 +8,6 @@
 - python
 - TCP socket
 - Đa luồng
-## hướng đãn chạy
+## hướng dẫn chạy
 1. chạy server : python server.py
 2. chạy client: python client.py
