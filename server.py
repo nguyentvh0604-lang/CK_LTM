@@ -1,55 +1,61 @@
 import socket
 import threading
+import json
 
 HOST = '127.0.0.1'
 PORT = 5050
-ADDR = (HOST, PORT)
 FORMAT = 'utf-8'
 
-server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.bind(ADDR)
+clients_dict = {}
 
-clients = []
-nicknames = []
+def broadcast(message_obj):
+    json_data = json.dumps(message_obj).encode(FORMAT)
+    for nickname in clients_dict:
+        clients_dict[nickname].send(json_data)
 
-def broadcast(message):
-    """Gửi tin nhắn đến tất cả client đang kết nối"""
-    for client in clients:
-        client.send(message)
-
-def handle_client(client):
-    """Xử lý luồng dữ liệu riêng cho từng client"""
+def handle_client(client, nickname):
     while True:
         try:
-            message = client.recv(1024)
-            broadcast(message)
+            data = client.recv(1024).decode(FORMAT)
+            if not data: break
+            
+            msg_obj = json.loads(data)
+            msg_type = msg_obj.get("type")
+
+            if msg_type == "group":
+                broadcast(msg_obj)
+            
+            elif msg_type == "private":
+                receiver = msg_obj.get("receiver")
+                if receiver in clients_dict:
+                    clients_dict[receiver].send(json.dumps(msg_obj).encode(FORMAT))
+                    client.send(json.dumps(msg_obj).encode(FORMAT))
+                else:
+                    error_msg = {"type": "system", "content": f"User {receiver} offline."}
+                    client.send(json.dumps(error_msg).encode(FORMAT))
         except:
-            index = clients.index(client)
-            clients.remove(client)
-            client.close()
-            nickname = nicknames[index]
-            broadcast(f'{nickname} đã rời khỏi phòng chat!'.encode(FORMAT))
-            nicknames.remove(nickname)
             break
 
-def receive():
-    """Chấp nhận kết nối mới liên tục"""
+    del clients_dict[nickname]
+    client.close()
+    broadcast({"type": "system", "content": f"{nickname} left."})
+
+def start_server():
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind((HOST, PORT))
     server.listen()
-    print(f"[SERVER] Đang chạy trên {HOST}...")
+    print(f"Server: {HOST}:{PORT}")
+
     while True:
-        client, address = server.accept()
-        print(f"Kết nối mới từ {str(address)}")
-
-        client.send('NICK'.encode(FORMAT))
+        client, addr = server.accept()
+        client.send("NICK_REQUEST".encode(FORMAT))
         nickname = client.recv(1024).decode(FORMAT)
-        nicknames.append(nickname)
-        clients.append(client)
-
-        print(f"Nickname của client là {nickname}")
-        broadcast(f"{nickname} đã tham gia vào đoạn chat!".encode(FORMAT))
-        client.send('Đã kết nối đến server!'.encode(FORMAT))
-
-        thread = threading.Thread(target=handle_client, args=(client,))
+        
+        clients_dict[nickname] = client
+        broadcast({"type": "system", "content": f"{nickname} joined."})
+        
+        thread = threading.Thread(target=handle_client, args=(client, nickname))
         thread.start()
 
-receive()
+if __name__ == "__main__":
+    start_server()
