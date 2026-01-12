@@ -1,49 +1,71 @@
 import socket
 import threading
+import json
 
-# Cấu hình Server
 HOST = '127.0.0.1'
 PORT = 5050
-clients = {} 
+FORMAT = 'utf-8'
 
-def handle_client(client_socket, address):
-    print(f"[NEW CONNECTION] {address} connected.")
-    
-    try:
-        username = client_socket.recv(1024).decode('utf-8')
-        clients[username] = client_socket
-        print(f"[REGISTER] {username} đã gia nhập hệ thống.")
+clients_dict = {}
 
-        while True:
-            data = client_socket.recv(1024).decode('utf-8')
-            if not data:
-                break
+def broadcast(message_obj):
+    json_data = json.dumps(message_obj).encode(FORMAT)
+    for nickname in clients_dict:
+        clients_dict[nickname].send(json_data)
 
-            # TODO: 
-           
+def handle_client(client, nickname):
+    while True:
+        try:
+            data = client.recv(1024).decode(FORMAT)
+            if not data: break
             
-            print(f"[{username}] gửi tin: {data}")
-            
-            client_socket.send(f"Server đã nhận tin từ {username}".encode('utf-8'))
+            msg_obj = json.loads(data)
+            msg_type = msg_obj.get("type")
 
-    except Exception as e:
-        print(f"[ERROR] Lỗi với client {address}: {e}")
-    finally:
-        client_socket.close()
-        # TODO: Xóa client khỏi danh sách khi ngắt kết nối
+            if msg_type == "group":
+                broadcast(msg_obj)
+            
+            elif msg_type == "private":
+                receiver = msg_obj.get("receiver")
+                if receiver in clients_dict:
+                    clients_dict[receiver].send(json.dumps(msg_obj).encode(FORMAT))
+                    client.send(json.dumps(msg_obj).encode(FORMAT))
+                else:
+                    error_msg = {"type": "system", "content": f"User {receiver} offline."}
+                    client.send(json.dumps(error_msg).encode(FORMAT))
+        except:
+            break
+
+    if nickname in clients_dict:
+        del clients_dict[nickname]
+        client.close()
+        broadcast({"type": "system", "content": f"{nickname} left."})
 
 def start_server():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind((HOST, PORT))
     server.listen()
-    print(f"[LISTENING] Server đang chạy trên {HOST}:{PORT}")
+    print(f"Server is running on {HOST}:{PORT}")
 
     while True:
-        conn, addr = server.accept()
+        client, addr = server.accept()
         
-        thread = threading.Thread(target=handle_client, args=(conn, addr))
+        while True:
+            client.send("NICK_REQUEST".encode(FORMAT))
+            nickname = client.recv(1024).decode(FORMAT)
+            
+            if nickname in clients_dict:
+                client.send("NICK_REJECTED".encode(FORMAT))
+            else:
+                clients_dict[nickname] = client
+                client.send("NICK_ACCEPTED".encode(FORMAT))
+                break
+        
+        print(f"Connected with {addr} as {nickname}")
+        broadcast({"type": "system", "content": f"{nickname} joined."})
+        
+        thread = threading.Thread(target=handle_client, args=(client, nickname))
         thread.start()
-        print(f"[ACTIVE CONNECTIONS] {threading.active_count() - 1}")
 
 if __name__ == "__main__":
     start_server()
