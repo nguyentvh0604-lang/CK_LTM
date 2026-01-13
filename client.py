@@ -1,7 +1,7 @@
 import socket
 import threading
 import tkinter as tk
-from tkinter import scrolledtext, simpledialog
+from tkinter import scrolledtext, simpledialog, messagebox
 import json
 
 HOST = '127.0.0.1'
@@ -11,66 +11,121 @@ class ChatClient:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Chat App")
-        
+        self.nickname = ""
+        self.waiting_nick = False
+
         self.text_area = scrolledtext.ScrolledText(self.root, state='disabled')
-        self.text_area.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
-        
+        self.text_area.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
         self.input_area = tk.Entry(self.root)
-        self.input_area.pack(padx=10, pady=10, fill=tk.X)
+        self.input_area.pack(fill=tk.X, padx=10)
         self.input_area.bind("<Return>", lambda e: self.send_message())
 
-        self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.client.connect((HOST, PORT))
+        self.send_btn = tk.Button(self.root, text="Gửi", command=self.send_message)
+        self.send_btn.pack(pady=5)
 
+        try:
+            self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client.connect((HOST, PORT))
+        except:
+            messagebox.showerror("Lỗi", "Không kết nối được server")
+            self.root.destroy()
+            return
+
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         threading.Thread(target=self.receive, daemon=True).start()
         self.root.mainloop()
 
+    # ================= THREAD SOCKET =================
     def receive(self):
-        while True:
-            try:
-                message_raw = self.client.recv(1024).decode('utf-8')
-                if message_raw == "NICK_REQUEST":
-                    if not hasattr(self, 'nickname'):
-                        self.nickname = simpledialog.askstring("Nickname", "Name:")
-                    self.client.send(self.nickname.encode('utf-8'))
-                else:
-                    msg_obj = json.loads(message_raw)
-                    self.display_message(msg_obj)
-            except:
-                break
+        buffer = ""
+        try:
+            while True:
+                data = self.client.recv(4096).decode('utf-8')
+                if not data:
+                    break
+
+                buffer += data
+                while "\n" in buffer:
+                    line, buffer = buffer.split("\n", 1)
+
+                    if line == "NICK_REQUEST":
+                        self.root.after(0, self.ask_nickname)
+                    else:
+                        msg = json.loads(line)
+                        self.root.after(0, self.display, msg)
+        except:
+            self.root.after(0, self.on_close)
+
+    # ================= GUI THREAD =================
+    def ask_nickname(self):
+        if self.waiting_nick:
+            return
+        self.waiting_nick = True
+
+        name = simpledialog.askstring(
+            "Nickname", "Nhập nickname:", parent=self.root
+        )
+
+        if not name:
+            self.on_close()
+            return
+
+        self.nickname = name
+        self.client.send((name + "\n").encode('utf-8'))
+        self.waiting_nick = False
 
     def send_message(self):
-        raw_text = self.input_area.get()
-        if not raw_text: return
-        
-        if raw_text.startswith("/msg "):
+        text = self.input_area.get()
+        if not text or not self.nickname:
+            return
+
+        if text.startswith("/msg "):
             try:
-                parts = raw_text.split(" ", 2)
-                packet = {"type": "private", "sender": self.nickname, "receiver": parts[1], "content": parts[2]}
-            except: return
+                _, receiver, content = text.split(" ", 2)
+                msg = {
+                    "type": "private",
+                    "sender": self.nickname,
+                    "receiver": receiver,
+                    "content": content
+                }
+            except:
+                self.display({
+                    "type": "system",
+                    "content": "Sai cú pháp: /msg ten noi_dung"
+                })
+                return
         else:
-            packet = {"type": "group", "sender": self.nickname, "content": raw_text}
-        
-        self.client.send(json.dumps(packet).encode('utf-8'))
+            msg = {
+                "type": "group",
+                "sender": self.nickname,
+                "content": text
+            }
+
+        self.client.send((json.dumps(msg) + "\n").encode('utf-8'))
         self.input_area.delete(0, tk.END)
 
-    def display_message(self, msg_obj):
+    def display(self, msg):
         self.text_area.config(state='normal')
-        m_type = msg_obj.get("type")
-        sender = msg_obj.get("sender", "System")
-        content = msg_obj.get("content")
 
-        if m_type == "private":
-            self.text_area.insert(tk.END, f"[PM] {sender}: {content}\n", "p")
-        elif m_type == "system":
-            self.text_area.insert(tk.END, f"! {content}\n", "s")
+        if msg["type"] == "system":
+            self.text_area.insert(tk.END, f"** {msg['content']} **\n", "sys")
+        elif msg["type"] == "private":
+            self.text_area.insert(tk.END, f"[PM] {msg['sender']}: {msg['content']}\n", "pm")
         else:
-            self.text_area.insert(tk.END, f"{sender}: {content}\n")
-            
-        self.text_area.tag_config("p", foreground="purple")
-        self.text_area.tag_config("s", foreground="grey")
+            self.text_area.insert(tk.END, f"{msg['sender']}: {msg['content']}\n")
+
+        self.text_area.tag_config("sys", foreground="red")
+        self.text_area.tag_config("pm", foreground="blue")
         self.text_area.yview(tk.END)
         self.text_area.config(state='disabled')
+
+    def on_close(self):
+        try:
+            self.client.close()
+        except:
+            pass
+        self.root.destroy()
 
 if __name__ == "__main__":
     ChatClient()
