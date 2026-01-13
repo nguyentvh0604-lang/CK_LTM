@@ -36,7 +36,6 @@ class ChatClient:
         threading.Thread(target=self.receive, daemon=True).start()
         self.root.mainloop()
 
-    # ================= THREAD SOCKET =================
     def receive(self):
         buffer = ""
         try:
@@ -57,7 +56,6 @@ class ChatClient:
         except:
             self.root.after(0, self.on_close)
 
-    # ================= GUI THREAD =================
     def ask_nickname(self):
         if self.waiting_nick:
             return
@@ -78,6 +76,10 @@ class ChatClient:
     def send_message(self):
         text = self.input_area.get()
         if not text or not self.nickname:
+            return
+
+        if text.strip() == "/exit":
+            self.on_close()
             return
 
         if text.startswith("/msg "):
