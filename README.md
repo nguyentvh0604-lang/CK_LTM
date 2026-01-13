@@ -71,3 +71,8 @@
 ### Đối với client:
 
 - python client.py
+
+## 6. Lệnh
+
+/msg <ten> <noi dung> gửi riêng cho một người
+/exit thoát khỏi đoạn chat
