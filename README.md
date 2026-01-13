@@ -1,21 +1,73 @@
-#LTM\_ Chat client server pyhton
-Nhom4\_
+# Chat Client–Server TCP (Python)
 
-## Mô tả
+# Nhóm 4
 
-Ứng dụng chat đa người sử dụng python và server và TCP socket
+## 1. Giới thiệu
 
-## cấu trúc
+Đây là ứng dụng chat đơn giản theo mô hình **Client – Server**, sử dụng giao thức **TCP Socket** trong Python.  
+Ứng dụng cho phép nhiều client kết nối đồng thời đến server, hỗ trợ:
 
-- "server.py": 1 server quản lý nhiều client
-- "client": client gửi và nhận tin nhắn
-  ##Công nghệ
-- python
-- TCP socket
-- Đa luồng
-- Client Async với Tkinter
+- Chat nhóm
+- Chat riêng giữa các client
+- Hiển thị thông báo hệ thống khi client vào/ra phòng chat
+- Giao diện đồ họa sử dụng Tkinter đơn giản
 
-## hướng dẫn chạy
+---
 
-1. chạy server : python server.py
-2. chạy client: python client.py
+## 2. Công nghệ sử dụng
+
+- Ngôn ngữ: **Python 3**
+- Thư viện:
+  - `socket` – lập trình mạng TCP
+  - `asyncio` – xử lý đa kết nối phía server
+  - `threading` – xử lý luồng phía client
+  - `tkinter` – giao diện đồ họa
+  - `json` – đóng gói dữ liệu trao đổi giữa client và server
+
+---
+
+## 3. Kiến trúc hệ thống
+
+### 3.1 Mô hình Client – Server
+
+- **Server**:
+
+  - Lắng nghe kết nối từ nhiều client
+  - Quản lý danh sách client đang online
+  - Phát tin nhắn chat nhóm
+  - Chuyển tiếp tin nhắn riêng
+
+- **Client**:
+  - Kết nối đến server
+  - Nhập nickname khi tham gia
+  - Gửi và nhận tin nhắn
+  - Hiển thị nội dung chat qua giao diện Tkinter
+
+---
+
+## 4. Chức năng chính
+
+### 4.1 Phía Server
+
+- Chấp nhận nhiều kết nối cùng lúc
+- Yêu cầu client nhập nickname khi kết nối
+- Kiểm tra trùng nickname
+- Gửi thông báo hệ thống
+- Chat nhóm (broadcast)
+- Chat riêng giữa 2 client
+
+### 4.2 Phía Client
+
+- Nhập nickname khi tham gia phòng chat
+- Gửi tin nhắn chat nhóm
+- Gửi tin nhắn riêng theo cú pháp:
+
+## 5. Cách chạy
+
+### Đối với server:
+
+- python server.py
+
+### Đối với client:
+
+- python client.py
