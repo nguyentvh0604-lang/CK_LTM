@@ -1,76 +1,94 @@
 import socket
 import threading
-import tkinter as tk
-from tkinter import scrolledtext, simpledialog
 import json
+import sys
 
 HOST = '127.0.0.1'
 PORT = 5050
+FORMAT = 'utf-8'
 
-class ChatClient:
-    def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("Chat App")
-        
-        self.text_area = scrolledtext.ScrolledText(self.root, state='disabled')
-        self.text_area.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
-        
-        self.input_area = tk.Entry(self.root)
-        self.input_area.pack(padx=10, pady=10, fill=tk.X)
-        self.input_area.bind("<Return>", lambda e: self.send_message())
+client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client.connect((HOST, PORT))
 
-        self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.client.connect((HOST, PORT))
-
-        threading.Thread(target=self.receive, daemon=True).start()
-        self.root.mainloop()
-
-    def receive(self):
-        while True:
-            try:
-                message_raw = self.client.recv(1024).decode('utf-8')
-                if message_raw == "NICK_REQUEST":
-                    if not hasattr(self, 'nickname'):
-                        self.nickname = simpledialog.askstring("Nickname", "Name:")
-                    self.client.send(self.nickname.encode('utf-8'))
-                else:
-                    msg_obj = json.loads(message_raw)
-                    self.display_message(msg_obj)
-            except:
-                break
-
-    def send_message(self):
-        raw_text = self.input_area.get()
-        if not raw_text: return
-        
-        if raw_text.startswith("/msg "):
-            try:
-                parts = raw_text.split(" ", 2)
-                packet = {"type": "private", "sender": self.nickname, "receiver": parts[1], "content": parts[2]}
-            except: return
-        else:
-            packet = {"type": "group", "sender": self.nickname, "content": raw_text}
-        
-        self.client.send(json.dumps(packet).encode('utf-8'))
-        self.input_area.delete(0, tk.END)
-
-    def display_message(self, msg_obj):
-        self.text_area.config(state='normal')
-        m_type = msg_obj.get("type")
-        sender = msg_obj.get("sender", "System")
-        content = msg_obj.get("content")
-
-        if m_type == "private":
-            self.text_area.insert(tk.END, f"[PM] {sender}: {content}\n", "p")
-        elif m_type == "system":
-            self.text_area.insert(tk.END, f"! {content}\n", "s")
-        else:
-            self.text_area.insert(tk.END, f"{sender}: {content}\n")
+def receive():
+    while True:
+        try:
+            message = client.recv(1024).decode(FORMAT)
             
-        self.text_area.tag_config("p", foreground="purple")
-        self.text_area.tag_config("s", foreground="grey")
-        self.text_area.yview(tk.END)
-        self.text_area.config(state='disabled')
+            if message == "NICK_REQUEST":
+                pass
+            elif message == "NICK_REJECTED":
+                print("[Hệ thống] Tên này đã tồn tại. Vui lòng chọn tên khác!")
+            elif message == "NICK_ACCEPTED":
+                print("[Hệ thống] Kết nối thành công!")
+            else:
+                data = json.loads(message)
+                msg_type = data.get("type")
+                content = data.get("content")
+                
+                if msg_type == "system":
+                    print(f"\n*** {content} ***")
+                elif msg_type == "private":
+                    sender = data.get("sender", "Ẩn danh")
+                    print(f"\n[PM từ {sender}]: {content}")
+                else:
+                    sender = data.get("sender", "Người dùng")
+                    print(f"\n[{sender}]: {content}")
+                
+                print("> ", end="", flush=True) 
+        except:
+            print("Đã mất kết nối với Server.")
+            client.close()
+            break
+
+def write(nickname):
+    while True:
+        try:
+            content = input("> ")
+            
+            if content.startswith("/w "):
+                parts = content.split(" ", 2)
+                if len(parts) >= 3:
+                    receiver = parts[1]
+                    msg_body = parts[2]
+                    message_obj = {
+                        "type": "private",
+                        "sender": nickname,
+                        "receiver": receiver,
+                        "content": msg_body
+                    }
+                else:
+                    print("Lệnh sai! Cú pháp: /w [tên] [nội dung]")
+                    continue
+            else:
+                message_obj = {
+                    "type": "group",
+                    "sender": nickname,
+                    "content": content
+                }
+            
+            client.send(json.dumps(message_obj).encode(FORMAT))
+        except:
+            break
+
+def start_client():
+    nickname = ""
+    while True:
+        signal = client.recv(1024).decode(FORMAT)
+        if signal == "NICK_REQUEST":
+            nickname = input("Nhập biệt danh của bạn: ")
+            client.send(nickname.encode(FORMAT))
+        elif signal == "NICK_REJECTED":
+            print("Lỗi: Tên này đã có người dùng!")
+        elif signal == "NICK_ACCEPTED":
+            print(f"Chào mừng {nickname}! Bạn có thể bắt đầu chat.")
+            break
+
+    receive_thread = threading.Thread(target=receive)
+    receive_thread.daemon = True 
+    receive_thread.start()
+
+    write(nickname)
 
 if __name__ == "__main__":
-    ChatClient()
+    start_client()
