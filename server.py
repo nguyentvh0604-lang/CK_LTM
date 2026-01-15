@@ -1,71 +1,82 @@
-import socket
-import threading
+import asyncio
 import json
 
 HOST = '127.0.0.1'
 PORT = 5050
-FORMAT = 'utf-8'
 
-clients_dict = {}
+clients = {}
 
-def broadcast(message_obj):
-    json_data = json.dumps(message_obj).encode(FORMAT)
-    for nickname in clients_dict:
-        clients_dict[nickname].send(json_data)
+async def send(writer, obj):
+    writer.write((json.dumps(obj) + "\n").encode('utf-8'))
+    await writer.drain()
 
-def handle_client(client, nickname):
-    while True:
-        try:
-            data = client.recv(1024).decode(FORMAT)
-            if not data: break
-            
-            msg_obj = json.loads(data)
-            msg_type = msg_obj.get("type")
+async def broadcast(obj):
+    for w in clients.values():
+        await send(w, obj)
 
-            if msg_type == "group":
-                broadcast(msg_obj)
-            
-            elif msg_type == "private":
-                receiver = msg_obj.get("receiver")
-                if receiver in clients_dict:
-                    clients_dict[receiver].send(json.dumps(msg_obj).encode(FORMAT))
-                    client.send(json.dumps(msg_obj).encode(FORMAT))
-                else:
-                    error_msg = {"type": "system", "content": f"User {receiver} offline."}
-                    client.send(json.dumps(error_msg).encode(FORMAT))
-        except:
-            break
+async def handle_client(reader, writer):
+    writer.write(b"NICK_REQUEST\n")
+    await writer.drain()
 
-    if nickname in clients_dict:
-        del clients_dict[nickname]
-        client.close()
-        broadcast({"type": "system", "content": f"{nickname} left."})
+    nickname = None
+    try:
+        nickname = (await reader.readline()).decode('utf-8').strip()
 
-def start_server():
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((HOST, PORT))
-    server.listen()
-    print(f"Server is running on {HOST}:{PORT}")
+        if not nickname or nickname in clients:
+            await send(writer, {
+                "type": "system",
+                "content": "Nickname không hợp lệ hoặc đã tồn tại!"
+            })
+            writer.close()
+            return
 
-    while True:
-        client, addr = server.accept()
-        
+        clients[nickname] = writer
+        print(f"[+] {nickname} connected")
+
+        await broadcast({
+            "type": "system",
+            "content": f"{nickname} đã tham gia phòng chat"
+        })
+
         while True:
-            client.send("NICK_REQUEST".encode(FORMAT))
-            nickname = client.recv(1024).decode(FORMAT)
-            
-            if nickname in clients_dict:
-                client.send("NICK_REJECTED".encode(FORMAT))
-            else:
-                clients_dict[nickname] = client
-                client.send("NICK_ACCEPTED".encode(FORMAT))
+            data = await reader.readline()
+            if not data:
                 break
-        
-        print(f"Connected with {addr} as {nickname}")
-        broadcast({"type": "system", "content": f"{nickname} joined."})
-        
-        thread = threading.Thread(target=handle_client, args=(client, nickname))
-        thread.start()
+
+            msg = json.loads(data.decode('utf-8'))
+
+            if msg["type"] == "group":
+                await broadcast(msg)
+
+            elif msg["type"] == "private":
+                receiver = msg["receiver"]
+                if receiver in clients:
+                    await send(clients[receiver], msg)
+                    await send(writer, msg)
+                else:
+                    await send(writer, {
+                        "type": "system",
+                        "content": f"{receiver} không online"
+                    })
+
+    except Exception as e:
+        print("Lỗi:", e)
+
+    finally:
+        if nickname and nickname in clients:
+            del clients[nickname]
+            await broadcast({
+                "type": "system",
+                "content": f"{nickname} đã rời đi"
+            })
+        writer.close()
+        await writer.wait_closed()
+
+async def main():
+    server = await asyncio.start_server(handle_client, HOST, PORT)
+    print(f"Server đang chạy tại {HOST}:{PORT}")
+    async with server:
+        await server.serve_forever()
 
 if __name__ == "__main__":
-    start_server()
+    asyncio.run(main())
