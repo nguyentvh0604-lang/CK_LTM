@@ -1,94 +1,133 @@
 import socket
 import threading
+import tkinter as tk
+from tkinter import scrolledtext, simpledialog, messagebox
 import json
-import sys
 
 HOST = '127.0.0.1'
 PORT = 5050
-FORMAT = 'utf-8'
 
-client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client.connect((HOST, PORT))
+class ChatClient:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("Chat App")
+        self.nickname = ""
+        self.waiting_nick = False
 
-def receive():
-    while True:
+        self.text_area = scrolledtext.ScrolledText(self.root, state='disabled')
+        self.text_area.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self.input_area = tk.Entry(self.root)
+        self.input_area.pack(fill=tk.X, padx=10)
+        self.input_area.bind("<Return>", lambda e: self.send_message())
+
+        self.send_btn = tk.Button(self.root, text="Gửi", command=self.send_message)
+        self.send_btn.pack(pady=5)
+
         try:
-            message = client.recv(1024).decode(FORMAT)
-            
-            if message == "NICK_REQUEST":
-                pass
-            elif message == "NICK_REJECTED":
-                print("[Hệ thống] Tên này đã tồn tại. Vui lòng chọn tên khác!")
-            elif message == "NICK_ACCEPTED":
-                print("[Hệ thống] Kết nối thành công!")
-            else:
-                data = json.loads(message)
-                msg_type = data.get("type")
-                content = data.get("content")
-                
-                if msg_type == "system":
-                    print(f"\n*** {content} ***")
-                elif msg_type == "private":
-                    sender = data.get("sender", "Ẩn danh")
-                    print(f"\n[PM từ {sender}]: {content}")
-                else:
-                    sender = data.get("sender", "Người dùng")
-                    print(f"\n[{sender}]: {content}")
-                
-                print("> ", end="", flush=True) 
+            self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client.connect((HOST, PORT))
         except:
-            print("Đã mất kết nối với Server.")
-            client.close()
-            break
+            messagebox.showerror("Lỗi", "Không kết nối được server")
+            self.root.destroy()
+            return
 
-def write(nickname):
-    while True:
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        threading.Thread(target=self.receive, daemon=True).start()
+        self.root.mainloop()
+
+    def receive(self):
+        buffer = ""
         try:
-            content = input("> ")
-            
-            if content.startswith("/w "):
-                parts = content.split(" ", 2)
-                if len(parts) >= 3:
-                    receiver = parts[1]
-                    msg_body = parts[2]
-                    message_obj = {
-                        "type": "private",
-                        "sender": nickname,
-                        "receiver": receiver,
-                        "content": msg_body
-                    }
-                else:
-                    print("Lệnh sai! Cú pháp: /w [tên] [nội dung]")
-                    continue
-            else:
-                message_obj = {
-                    "type": "group",
-                    "sender": nickname,
+            while True:
+                data = self.client.recv(4096).decode('utf-8')
+                if not data:
+                    break
+
+                buffer += data
+                while "\n" in buffer:
+                    line, buffer = buffer.split("\n", 1)
+
+                    if line == "NICK_REQUEST":
+                        self.root.after(0, self.ask_nickname)
+                    else:
+                        msg = json.loads(line)
+                        self.root.after(0, self.display, msg)
+        except:
+            self.root.after(0, self.on_close)
+
+    def ask_nickname(self):
+        if self.waiting_nick:
+            return
+        self.waiting_nick = True
+
+        name = simpledialog.askstring(
+            "Nickname", "Nhập nickname:", parent=self.root
+        )
+
+        if not name:
+            self.on_close()
+            return
+
+        self.nickname = name
+        self.client.send((name + "\n").encode('utf-8'))
+        self.waiting_nick = False
+
+    def send_message(self):
+        text = self.input_area.get()
+        if not text or not self.nickname:
+            return
+
+        if text.strip() == "/exit":
+            self.on_close()
+            return
+
+        if text.startswith("/msg "):
+            try:
+                _, receiver, content = text.split(" ", 2)
+                msg = {
+                    "type": "private",
+                    "sender": self.nickname,
+                    "receiver": receiver,
                     "content": content
                 }
-            
-            client.send(json.dumps(message_obj).encode(FORMAT))
+            except:
+                self.display({
+                    "type": "system",
+                    "content": "Sai cú pháp: /msg ten noi_dung"
+                })
+                return
+        else:
+            msg = {
+                "type": "group",
+                "sender": self.nickname,
+                "content": text
+            }
+
+        self.client.send((json.dumps(msg) + "\n").encode('utf-8'))
+        self.input_area.delete(0, tk.END)
+
+    def display(self, msg):
+        self.text_area.config(state='normal')
+
+        if msg["type"] == "system":
+            self.text_area.insert(tk.END, f"** {msg['content']} **\n", "sys")
+        elif msg["type"] == "private":
+            self.text_area.insert(tk.END, f"[PM] {msg['sender']}: {msg['content']}\n", "pm")
+        else:
+            self.text_area.insert(tk.END, f"{msg['sender']}: {msg['content']}\n")
+
+        self.text_area.tag_config("sys", foreground="red")
+        self.text_area.tag_config("pm", foreground="blue")
+        self.text_area.yview(tk.END)
+        self.text_area.config(state='disabled')
+
+    def on_close(self):
+        try:
+            self.client.close()
         except:
-            break
-
-def start_client():
-    nickname = ""
-    while True:
-        signal = client.recv(1024).decode(FORMAT)
-        if signal == "NICK_REQUEST":
-            nickname = input("Nhập biệt danh của bạn: ")
-            client.send(nickname.encode(FORMAT))
-        elif signal == "NICK_REJECTED":
-            print("Lỗi: Tên này đã có người dùng!")
-        elif signal == "NICK_ACCEPTED":
-            print(f"Chào mừng {nickname}! Bạn có thể bắt đầu chat.")
-            break
-
-    receive_thread = threading.Thread(target=receive)
-    receive_thread.daemon = True 
-    receive_thread.start()
-
-    write(nickname)
+            pass
+        self.root.destroy()
 
 if __name__ == "__main__":
-    start_client()
+    ChatClient()
